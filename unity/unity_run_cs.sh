@@ -3,7 +3,7 @@ set -e
 
 WATCH_DIR="$HOME/.unity_code_executor"
 INPUT_FILE="$WATCH_DIR/input.cs"
-OUTPUT_FILE="$WATCH_DIR/output.txt"
+OUTPUT_FILE="$WATCH_DIR/output.jsonl"
 
 # Check if Unity is running
 if ! pgrep -x "Unity" > /dev/null; then
@@ -60,25 +60,52 @@ fi
 # Ensure watch directory exists
 mkdir -p "$WATCH_DIR"
 
-# Remove old output file
-rm -f "$OUTPUT_FILE"
+# Count lines before execution (0 if file doesn't exist)
+if [ -f "$OUTPUT_FILE" ]; then
+    LINES_BEFORE=$(wc -l < "$OUTPUT_FILE" | tr -d ' ')
+else
+    LINES_BEFORE=0
+fi
 
 # Write code to input file
 echo "$CODE" > "$INPUT_FILE"
 
-# Wait for output (poll with timeout)
+# Wait for input file to be consumed (Unity deletes it after reading)
 TIMEOUT=30
 for i in $(seq 1 $TIMEOUT); do
-    if [ -f "$OUTPUT_FILE" ]; then
-        cat "$OUTPUT_FILE"
-        # Check if it was an error
-        if grep -q "^ERROR:" "$OUTPUT_FILE"; then
-            exit 1
-        fi
-        exit 0
+    if [ ! -f "$INPUT_FILE" ]; then
+        # Input consumed, wait a tiny bit for logs to be written
+        sleep 0.1
+        break
     fi
     sleep 0.5
 done
 
-echo "Timeout waiting for Unity response after ${TIMEOUT}s"
-exit 1
+if [ -f "$INPUT_FILE" ]; then
+    echo "Timeout waiting for Unity to consume input after ${TIMEOUT}s"
+    exit 1
+fi
+
+# Get new lines (diff)
+if [ -f "$OUTPUT_FILE" ]; then
+    LINES_AFTER=$(wc -l < "$OUTPUT_FILE" | tr -d ' ')
+    if [ "$LINES_AFTER" -gt "$LINES_BEFORE" ]; then
+        # Show new lines, formatted with type prefix
+        tail -n +$((LINES_BEFORE + 1)) "$OUTPUT_FILE" | while IFS= read -r line; do
+            # Parse JSONL and format output
+            msg=$(echo "$line" | sed -n 's/.*"message":"\([^"]*\)".*/\1/p' | sed 's/\\n/\n/g; s/\\t/\t/g; s/\\"/"/g; s/\\\\/\\/g')
+            type=$(echo "$line" | sed -n 's/.*"type":"\([^"]*\)".*/\1/p')
+            case "$type" in
+                error|assert|exception)
+                    echo "[$type] $msg"
+                    ;;
+                warning)
+                    echo "[$type] $msg"
+                    ;;
+                *)
+                    echo "$msg"
+                    ;;
+            esac
+        done
+    fi
+fi
