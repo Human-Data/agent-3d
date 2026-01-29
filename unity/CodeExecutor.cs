@@ -13,58 +13,21 @@ public static class CodeExecutor
 {
     private static readonly string WatchDir;
     private static readonly string InputPath;
-    private static readonly string OutputPath;
-    private static int lastLogCount = 0;
 
     static CodeExecutor()
     {
         var homeDir = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         WatchDir = Path.Combine(homeDir, ".unity_code_executor");
         InputPath = Path.Combine(WatchDir, "input.cs");
-        OutputPath = Path.Combine(WatchDir, "output.jsonl");
 
         if (!Directory.Exists(WatchDir))
         {
             Directory.CreateDirectory(WatchDir);
         }
 
-        // Subscribe to all Unity logs
-        Application.logMessageReceived += OnLogReceived;
         EditorApplication.update += CheckForInput;
-        EditorApplication.update += CheckForConsoleClear;
 
         UnityEngine.Debug.Log("[CodeExecutor] Initialized. Watching: " + InputPath);
-    }
-
-    private static void OnLogReceived(string message, string stackTrace, LogType type)
-    {
-        // Skip our own initialization message
-        if (message.StartsWith("[CodeExecutor]")) return;
-
-        string logType = type switch
-        {
-            LogType.Error => "error",
-            LogType.Assert => "assert",
-            LogType.Exception => "exception",
-            LogType.Warning => "warning",
-            _ => "log"
-        };
-
-        // Escape JSON string
-        var escapedMessage = message
-            .Replace("\\", "\\\\")
-            .Replace("\"", "\\\"")
-            .Replace("\n", "\\n")
-            .Replace("\r", "\\r")
-            .Replace("\t", "\\t");
-
-        var jsonLine = $"{{\"message\":\"{escapedMessage}\",\"type\":\"{logType}\"}}";
-
-        try
-        {
-            File.AppendAllText(OutputPath, jsonLine + "\n");
-        }
-        catch { }
     }
 
     private static void CheckForInput()
@@ -88,47 +51,6 @@ public static class CodeExecutor
         ExecuteCode(code);
     }
 
-    private static void CheckForConsoleClear()
-    {
-        int currentLogCount = GetLogCount();
-
-        if (lastLogCount > 0 && currentLogCount == 0)
-        {
-            ClearOutputFile();
-        }
-        lastLogCount = currentLogCount;
-    }
-
-    private static int GetLogCount()
-    {
-        var logEntriesType = typeof(Editor).Assembly.GetType("UnityEditor.LogEntries");
-        if (logEntriesType == null) return 0;
-
-        var getCountMethod = logEntriesType.GetMethod("GetCount", BindingFlags.Public | BindingFlags.Static);
-        if (getCountMethod == null) return 0;
-
-        return (int)getCountMethod.Invoke(null, null);
-    }
-
-    private static void ClearOutputFile()
-    {
-        try
-        {
-            if (File.Exists(OutputPath))
-            {
-                File.Delete(OutputPath);
-            }
-        }
-        catch { }
-    }
-
-    [MenuItem("Tools/Code Executor/Clear Output")]
-    public static void ClearOutputMenuItem()
-    {
-        ClearOutputFile();
-        UnityEngine.Debug.Log("[CodeExecutor] Output cleared");
-    }
-
     [MenuItem("Tools/Code Executor/Test Executor")]
     public static void TestExecutor()
     {
@@ -145,6 +67,30 @@ public static class CodeExecutor
         }
         else
         {
+            // Extract using statements from user code
+            var lines = code.Split('\n');
+            var usingStatements = new StringBuilder();
+            var codeWithoutUsings = new StringBuilder();
+            bool inUsingSection = true;
+
+            foreach (var line in lines)
+            {
+                var trimmed = line.Trim();
+                if (inUsingSection && trimmed.StartsWith("using ") && trimmed.EndsWith(";"))
+                {
+                    usingStatements.AppendLine(line);
+                }
+                else if (!string.IsNullOrWhiteSpace(trimmed))
+                {
+                    inUsingSection = false;
+                    codeWithoutUsings.AppendLine(line);
+                }
+                else if (!inUsingSection)
+                {
+                    codeWithoutUsings.AppendLine(line);
+                }
+            }
+
             fullCode = $@"
 using UnityEngine;
 using UnityEditor;
@@ -153,12 +99,12 @@ using System.IO;
 using System.Linq;
 using System.Collections.Generic;
 using UnityEngine.SceneManagement;
-
+{usingStatements}
 public static class DynamicCode
 {{
     public static object Execute()
     {{
-        {code}
+        {codeWithoutUsings}
         return null;
     }}
 }}";
