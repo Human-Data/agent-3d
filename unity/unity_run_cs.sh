@@ -84,7 +84,7 @@ TIMEOUT=30
 for i in $(seq 1 $TIMEOUT); do
     if [ ! -f "$INPUT_FILE" ]; then
         # Input consumed, wait for code execution and logs to be written
-        sleep 2
+        sleep 3
         break
     fi
     sleep 0.5

@@ -134,6 +134,11 @@ public static class DynamicCode
 
         if (compileResult.Errors.HasErrors)
         {
+            UnityEngine.Debug.LogError("=== Generated Code ===");
+            var numberedLines = fullCode.Split('\n')
+                .Select((line, idx) => $"{idx + 1,4}: {line}");
+            UnityEngine.Debug.LogError(string.Join("\n", numberedLines));
+            UnityEngine.Debug.LogError("=== Compilation Errors ===");
             foreach (CompilerError error in compileResult.Errors)
             {
                 UnityEngine.Debug.LogError($"Line {error.Line}: {error.ErrorText}");

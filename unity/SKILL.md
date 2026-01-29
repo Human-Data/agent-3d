@@ -138,3 +138,35 @@ UnityEngine.Object.DestroyImmediate(tex);
 return $"Saved {width}x{height}";
 EOF
 ```
+
+### Add new component to GO
+- step 1: create the Mono behavior .cs script
+- step 2: Write the .meta file (Unity needs this to track the asset). NO `MonoImporter:` section. only these two lines are needed
+```.meta
+fileFormatVersion: 2
+guid: A RANDOM UUID
+```
+
+# 3. Request compilation and attach the script
+$SKILL_DIR/unity_run_cs.sh <<'EOF'
+UnityEditor.CompilationCompilationPipeline.RequestScriptCompilation();
+
+// Find or create a GameObject
+var go = GameObject.Find("Cube");
+if (go == null) {
+    go = GameObject.CreatePrimitive(PrimitiveType.Cube);
+    go.name = "Cube";
+}
+
+// Attach the script component
+var script = go.AddComponent(System.Type.GetType("RotateObject"));
+if (script != null) {
+    // Set properties via reflection
+    var speedField = script.GetType().GetField("rotationSpeed");
+    speedField.SetValue(script, 100f);
+    Debug.Log($"Added RotateObject script to {go.name}");
+} else {
+    Debug.LogError("Failed to add RotateObject script");
+}
+EOF
+```
