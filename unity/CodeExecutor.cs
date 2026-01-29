@@ -159,5 +159,9 @@ public static class DynamicCode
         {
             UnityEngine.Debug.LogError(ex.InnerException?.Message ?? ex.Message);
         }
+        finally
+        {
+            AssetDatabase.Refresh();
+        }
     }
 }
