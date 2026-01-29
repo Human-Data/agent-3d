@@ -7,6 +7,19 @@ description: Control Unity Editor. Run C# code in batchmode to inspect, create, 
 
 Run arbitrary C# via `$SKILL_DIR/unity_run_cs.sh -c '<code>'` or `-f <file.cs>`.
 
+## First-Time Setup
+
+Copy `$SKILL_DIR/CodeExecutor.cs` to your Unity project's `Assets/Editor/` folder. Unity will auto-compile it.
+
+```bash
+cp $SKILL_DIR/CodeExecutor.cs <your-project>/Assets/Editor/
+```
+
+The CodeExecutor:
+- Watches `~/.unity_code_executor/input.cs` for code to execute
+- Writes logs to `~/.unity_code_executor/output.jsonl` (mirrors Unity console)
+- Clears output when Unity console is cleared
+
 ## Examples
 
 ### Inspect scene hierarchy
