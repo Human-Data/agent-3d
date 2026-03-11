@@ -10,12 +10,13 @@ Usage:
     acad_run.py < script.lsp           # from a file
 
 How it works: the code is written to bridge/cmd-<id>.lsp, one expression is typed
-at AutoCAD's command line (COM SendCommand) that
+at AutoCAD's command line (COM SendCommand on Windows, keystrokes on macOS) that
 loads the bridge and runs the file, and the bridge writes bridge/result-<id>.txt,
 which is printed here.
 """
 
 import os
+import platform
 import subprocess
 import sys
 import time
@@ -36,6 +37,16 @@ def lisp_str(s):
 # --- getting one expression onto AutoCAD's command line -------------------
 
 def send(expr):
+    system = platform.system()
+    if system == "Windows":
+        _send_windows(expr)
+    elif system == "Darwin":
+        _send_macos(expr)
+    else:
+        sys.exit(f"ERROR: unsupported platform {system} (AutoCAD runs on Windows/macOS)")
+
+
+def _send_windows(expr):
     """COM: AutoCAD.Application -> ActiveDocument.SendCommand. Uses the built-in
     Windows PowerShell 5.1 so no Python packages are needed."""
     ps = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"),
@@ -52,6 +63,24 @@ def send(expr):
                        env=env, capture_output=True, text=True)
     if r.returncode != 0:
         sys.exit(f"ERROR: could not send to AutoCAD: {r.stderr.strip()}")
+
+
+def _send_macos(expr):
+    """AutoCAD for Mac has no automation API: type the expression into its window.
+    Needs Accessibility access for the terminal (System Settings > Privacy & Security)."""
+    script = '''on run argv
+tell application "System Events"
+    set procs to every process whose name starts with "AutoCAD"
+    if (count of procs) is 0 then error "AutoCAD is not running"
+    set frontmost of item 1 of procs to true
+    delay 0.3
+    keystroke (item 1 of argv)
+    keystroke return
+end tell
+end run'''
+    r = subprocess.run(["osascript", "-e", script, expr], capture_output=True, text=True)
+    if r.returncode != 0:
+        sys.exit(f"ERROR: could not type into AutoCAD: {r.stderr.strip()}")
 
 
 # --- request / response over the bridge dir -------------------------------
