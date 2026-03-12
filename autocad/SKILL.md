@@ -5,7 +5,7 @@ description: Control AutoCAD via AutoLISP. Run arbitrary AutoLISP code in a runn
 
 # AutoCAD Skill
 
-Execute AutoLISP in the active drawing of a running AutoCAD. The value of the last expression comes back as `=> <value>`.
+Execute AutoLISP in the active drawing of a running AutoCAD. Command-line output (`princ`/`print`/`prompt`, command echo) comes back, followed by `=> <value of the last expression>`.
 
 ## Usage
 

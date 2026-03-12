@@ -85,6 +85,16 @@ end run'''
 
 # --- request / response over the bridge dir -------------------------------
 
+def clean(out):
+    lines = [l.rstrip() for l in out.splitlines()]
+    lines = [l for l in lines if l != "Command:"]  # prompt echoes in the log
+    while lines and not lines[0]:
+        lines.pop(0)
+    while lines and not lines[-1]:
+        lines.pop()
+    return "\n".join(lines)
+
+
 def run(code):
     os.makedirs(BRIDGE_DIR, exist_ok=True)
     req_id = uuid.uuid4().hex
@@ -106,7 +116,12 @@ def run(code):
                 result = f.read()
             os.remove(result_file)
             status, _, output = result.partition("\n")
-            print(output, end="")
+            output = clean(output)
+            if status.strip() == "ERROR":
+                lines = output.rsplit("\n", 1)
+                lines[-1] = "ERROR: " + lines[-1]
+                output = "\n".join(lines)
+            print(output)
             sys.exit(1 if status.strip() == "ERROR" else 0)
         time.sleep(0.05)
 
