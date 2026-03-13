@@ -8,6 +8,7 @@ Usage:
     (princ (getvar "CLAYER"))
     EOF
     acad_run.py < script.lsp           # from a file
+    acad_run.py --setup                # once: add this folder to AutoCAD's TRUSTEDPATHS
 
 How it works: the code is written to bridge/cmd-<id>.lsp, one expression is typed
 at AutoCAD's command line (COM SendCommand on Windows, keystrokes on macOS) that
@@ -129,12 +130,29 @@ def run(code):
         os.remove(cmd_file)
     except OSError:
         pass
-    sys.exit("ERROR: Timeout - no reply from AutoCAD. Is it idle at the Command: prompt?")
+    sys.exit("ERROR: Timeout - no reply from AutoCAD. Is it idle at the Command: prompt?"
+             " If it showed a security dialog about loading a .lsp, run: acad_run.py --setup")
+
+
+def setup():
+    """Add this folder (bridge + scripts) to TRUSTEDPATHS so SECURELOAD allows the load."""
+    os.makedirs(BRIDGE_DIR, exist_ok=True)
+    paths = " ".join(lisp_str(p) for p in (SKILL_DIR, BRIDGE_DIR))
+    send(f'(foreach p (list {paths})'
+         ' (if (not (vl-string-search p (getvar "TRUSTEDPATHS")))'
+         '  (setvar "TRUSTEDPATHS" (if (= (getvar "TRUSTEDPATHS") "") p'
+         '   (strcat (getvar "TRUSTEDPATHS") ";" p)))))')
+    time.sleep(1.0)
+    print("TRUSTEDPATHS updated; verifying the bridge round-trip...")
+    run('(princ (getvar "TRUSTEDPATHS"))')
 
 
 def main():
+    if sys.argv[1:] == ["--setup"]:
+        setup()
+        return
     if len(sys.argv) > 2:
-        sys.exit("usage: acad_run.py ['code']   (or pipe code via stdin/heredoc)")
+        sys.exit("usage: acad_run.py ['code'] | --setup   (or pipe code via stdin/heredoc)")
     code = sys.argv[1] if len(sys.argv) == 2 else sys.stdin.read()
     if not code.strip():
         sys.exit("error: no code given (pass as argument or via stdin)")

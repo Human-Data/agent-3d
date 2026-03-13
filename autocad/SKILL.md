@@ -20,3 +20,13 @@ EOF
 One-liners as a single argument: `python3 ~/.claude/skills/autocad/acad_run.py '(getvar "DWGNAME")'`. Files: `acad_run.py < script.lsp`.
 
 Exit code 0 on success, 1 if the code raised (message printed). Default timeout 30s.
+
+## Setup (once)
+
+AutoCAD (SECURELOAD) refuses to `load` .lsp files from untrusted folders. With AutoCAD running:
+
+```bash
+python3 ~/.claude/skills/autocad/acad_run.py --setup
+```
+
+Windows: driven over COM (`AutoCAD.Application`). macOS: the expression is typed into the AutoCAD window via System Events — grant your terminal Accessibility access and keep the AutoCAD window frontmost.
