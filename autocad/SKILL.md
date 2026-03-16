@@ -19,7 +19,7 @@ EOF
 
 One-liners as a single argument: `python3 ~/.claude/skills/autocad/acad_run.py '(getvar "DWGNAME")'`. Files: `acad_run.py < script.lsp`.
 
-Exit code 0 on success, 1 if the code raised (message printed). Default timeout 30s.
+Exit code 0 on success, 1 if the code raised (message printed). Default timeout 30s; `ACAD_RUN_TIMEOUT=120` for slow commands.
 
 ## Setup (once)
 

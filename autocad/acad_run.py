@@ -27,7 +27,10 @@ SKILL_DIR = os.path.dirname(os.path.abspath(__file__))
 BRIDGE_LSP = os.path.join(SKILL_DIR, "acad_bridge.lsp")
 BRIDGE_DIR = os.path.join(SKILL_DIR, "bridge")
 
-TIMEOUT = 30.0
+try:
+    TIMEOUT = float(os.environ.get("ACAD_RUN_TIMEOUT", "30"))
+except ValueError:
+    TIMEOUT = 30.0
 
 
 def lisp_str(s):
@@ -60,10 +63,16 @@ def _send_windows(expr):
         "} catch { [Console]::Error.WriteLine($_.Exception.Message); exit 1 }"
     )
     env = dict(os.environ, ACAD_CMD=expr + "\n")  # env var: no quoting issues
-    r = subprocess.run([ps, "-NoProfile", "-NonInteractive", "-Command", script],
-                       env=env, capture_output=True, text=True)
-    if r.returncode != 0:
-        sys.exit(f"ERROR: could not send to AutoCAD: {r.stderr.strip()}")
+    for attempt in range(5):  # AutoCAD rejects COM calls while briefly busy
+        r = subprocess.run([ps, "-NoProfile", "-NonInteractive", "-Command", script],
+                           env=env, capture_output=True, text=True)
+        if r.returncode == 0:
+            return
+        err = r.stderr.strip()
+        if "800401E3" in err or "Operation unavailable" in err:
+            sys.exit("ERROR: AutoCAD is not running (no AutoCAD.Application COM object)")
+        time.sleep(0.5 * (attempt + 1))
+    sys.exit(f"ERROR: could not send to AutoCAD: {err}")
 
 
 def _send_macos(expr):
