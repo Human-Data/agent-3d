@@ -10,11 +10,13 @@
 
 (vl-load-com)
 
-(defun claude-run (cmd res / lg skip val lf f line tmp)
+(defun claude-run (cmd res / was lg skip val lf f line tmp)
+  (setq was (getvar "LOGFILEMODE"))
   (setvar "LOGFILEMODE" 1)                       ; text window -> log file (princ, print, command echo)
   (setq lg   (getvar "LOGFILENAME")
         skip (if (and lg (findfile lg)) (vl-file-size lg) 0))   ; ignore anything already in the log
   (setq val (vl-catch-all-apply 'load (list cmd)))
+  (command)                                      ; cancel any command the script left pending
   (setvar "LOGFILEMODE" 0)                       ; flush + close the log
   (setq tmp (strcat res ".tmp")
         f   (open tmp "w"))
@@ -32,4 +34,5 @@
   (close f)
   (vl-file-rename tmp res)
   (vl-file-delete cmd)
+  (if (/= was 0) (setvar "LOGFILEMODE" was))     ; restore the user's own logging
   (princ))
