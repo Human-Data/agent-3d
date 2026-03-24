@@ -15,6 +15,9 @@ Usage:
 The code runs in a fresh namespace with:
     swApp    the running SolidWorks (ISldWorks)
     model    swApp.ActiveDoc when the run started (None if no document is open)
+    byref(v) ByRef/out argument (int/float/bool/str); read .value after the call
+    NOTHING  null object argument (VBA "Nothing"), e.g. SelectByID2's Callout
+    arr(seq) typed array argument: numbers -> doubles, COM objects -> dispatch, str -> strings
 
 Env: SW_PROGID (default SldWorks.Application).
 """
@@ -103,6 +106,44 @@ def connect():
             time.sleep(0.5)
 
 
+# --- helpers exposed to scripts ------------------------------------------------
+
+def byref(value=0):
+    """ByRef/out argument: pass it, then read .value."""
+    if isinstance(value, bool):
+        vt = pythoncom.VT_BOOL
+    elif isinstance(value, int):
+        vt = pythoncom.VT_I4
+    elif isinstance(value, float):
+        vt = pythoncom.VT_R8
+    elif isinstance(value, str):
+        vt = pythoncom.VT_BSTR
+    else:
+        vt = pythoncom.VT_VARIANT
+    return VARIANT(pythoncom.VT_BYREF | vt, value)
+
+
+def arr(values, vt=None):
+    """Typed SAFEARRAY argument. Numbers -> doubles (pass vt=pythoncom.VT_I4 for ints)."""
+    values = list(values)
+    if vt is None:
+        if values and all(hasattr(v, "_oleobj_") or isinstance(v, dynamic.PyIDispatchType) for v in values):
+            vt = pythoncom.VT_DISPATCH
+        elif values and all(isinstance(v, str) for v in values):
+            vt = pythoncom.VT_BSTR
+        elif values and all(isinstance(v, bool) for v in values):
+            vt = pythoncom.VT_BOOL
+        elif all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in values):
+            vt = pythoncom.VT_R8
+        else:
+            vt = pythoncom.VT_VARIANT
+    if vt == pythoncom.VT_DISPATCH:
+        values = [getattr(v, "_oleobj_", v) for v in values]
+    elif vt == pythoncom.VT_R8:
+        values = [float(v) for v in values]
+    return VARIANT(pythoncom.VT_ARRAY | vt, values)
+
+
 # --- running the script ----------------------------------------------------------
 
 def run(code, swApp):
@@ -111,6 +152,9 @@ def run(code, swApp):
         "__name__": "__main__",
         "swApp": swApp,
         "model": swApp.ActiveDoc,
+        "byref": byref,
+        "arr": arr,
+        "NOTHING": VARIANT(pythoncom.VT_DISPATCH, None),
         "VARIANT": VARIANT,
         "pythoncom": pythoncom,
     }
