@@ -15,11 +15,11 @@ EOF
 
 One-liners: `sw_run.py 'print(model.GetPathName())'` · files: `sw_run.py < script.py`.
 
-Globals: `swApp` (ISldWorks) · `model` (ActiveDoc at start, `None` if nothing open) · `byref(v)` · `NOTHING` · `arr(seq)`.
+Globals: `swApp` (ISldWorks) · `model` (ActiveDoc at start, `None` if nothing open) · `swconst` (every enum: `swconst.swDocPART`) · `api(q)` · `byref(v)` · `NOTHING` · `arr(seq)`.
 
 ## Rules
 
-- Write calls exactly like the VBA API help: methods `()`, properties no `()`, **every argument required**. Interface = `I` + what you hold (`IFeature`, `IFace2`, `IComponent2`, `ISketchManager`); PartDoc/AssemblyDoc/DrawingDoc members work directly on `model`.
+- Write calls exactly like the VBA API help: methods `()`, properties no `()`, **every argument required**. Look up signatures offline: `api("IModelDocExtension")` lists an interface, `api("extrusion")` searches members + enums. Interface = `I` + what you hold (`IFeature`, `IFace2`, `IComponent2`, `ISketchManager`); PartDoc/AssemblyDoc/DrawingDoc members work directly on `model`.
 - **Units are SI always**: meters, radians, kg — whatever the document shows.
 - ByRef/out: `e = byref(0)`, pass `e`, read `e.value`. VBA `Nothing` → `NOTHING`. Array args → `arr([x, y, z])`. Arrays come back as tuples (`None` when empty).
 - Failures usually return `None`/`False`/an error code instead of raising: check returns.

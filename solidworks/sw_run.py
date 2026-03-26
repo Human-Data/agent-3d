@@ -15,6 +15,8 @@ Usage:
 The code runs in a fresh namespace with:
     swApp    the running SolidWorks (ISldWorks)
     model    swApp.ActiveDoc when the run started (None if no document is open)
+    swconst  every SolidWorks enum: swconst.swDocPART, swconst.swDocumentTypes_e.swDocPART
+    api(q)   search the type library: api("IFeature"), api("Extrusion"), api("swEndConditions_e")
     byref(v) ByRef/out argument (int/float/bool/str); read .value after the call
     NOTHING  null object argument (VBA "Nothing"), e.g. SelectByID2's Callout
     arr(seq) typed array argument: numbers -> doubles, COM objects -> dispatch, str -> strings
@@ -32,10 +34,12 @@ import json
 import linecache
 import locale
 import os
+import re
 import sys
 import tempfile
 import time
 import traceback
+from types import SimpleNamespace
 
 PROGID = os.environ.get("SW_PROGID", "SldWorks.Application")
 
@@ -167,6 +171,63 @@ def arr(values, vt=None):
     elif vt == pythoncom.VT_R8:
         values = [float(v) for v in values]
     return VARIANT(pythoncom.VT_ARRAY | vt, values)
+
+
+class Consts(SimpleNamespace):
+    def __getattr__(self, name):
+        if name.startswith("__"):
+            raise AttributeError(name)
+        if not self.__dict__:
+            raise AttributeError("swconst unavailable (SolidWorks type library not found) - use numeric values")
+        raise AttributeError(f"swconst.{name} not found - search with api({name!r})")
+
+
+def make_consts(enums):
+    flat = {}
+    for members in enums.values():
+        flat.update(members)
+    ns = Consts(**flat)
+    for name, members in enums.items():
+        setattr(ns, name, SimpleNamespace(**members))
+    return ns
+
+
+def make_api(enums, api_path):
+    cache = {}
+
+    def api(query, limit=80):
+        """api("IFeature") lists an interface, api("swEndConditions_e") an enum,
+        anything else is a case-insensitive substring search over member and enum names."""
+        if not api_path or not os.path.isfile(api_path):
+            print("api() unavailable: SolidWorks type library not found")
+            return
+        if "ifaces" not in cache:
+            with open(api_path, encoding="utf-8") as f:
+                cache["ifaces"] = json.load(f)
+        ifaces = cache["ifaces"]
+        q = query.strip().lower()
+        for n, lines in ifaces.items():
+            if n.lower() in (q, "i" + q):
+                print(f"{n}:\n  " + "\n  ".join(lines))
+                return
+        for e, members in enums.items():
+            if e.lower() == q:
+                print(f"{e}:\n" + "\n".join(f"  {k} = {v}" for k, v in members.items()))
+                return
+        hits = []
+        for n, lines in ifaces.items():
+            if q in n.lower():
+                hits.append(f"{n}  (interface, {len(lines)} members)")
+            hits += [f"{n}.{l}" for l in lines if q in re.split(r"[(:]", l, 1)[0].lower()]
+        for e, members in enums.items():
+            if q in e.lower():
+                hits.append(f"{e}  (enum, {len(members)} values)")
+            hits += [f"{e}.{k} = {v}" for k, v in members.items() if q in k.lower()]
+        print("\n".join(hits[:limit]) or f"no match for {query!r}")
+        if len(hits) > limit:
+            print(f"... {len(hits) - limit} more (narrow the query, or api({query!r}, limit={len(hits)}))")
+
+    return api
 
 
 # --- type library: method/property names, enums, signatures --------------------
@@ -366,6 +427,8 @@ def run(code, swApp, enums, api_path):
         "__name__": "__main__",
         "swApp": swApp,
         "model": swApp.ActiveDoc,
+        "swconst": make_consts(enums),
+        "api": make_api(enums, api_path),
         "byref": byref,
         "arr": arr,
         "NOTHING": VARIANT(pythoncom.VT_DISPATCH, None),
