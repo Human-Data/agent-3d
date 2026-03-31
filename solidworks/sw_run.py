@@ -26,7 +26,7 @@ methods from properties. The SolidWorks type library is read once (and cached in
 %TEMP%\\sw_run_cache) so calls behave like the VBA docs: methods take (),
 properties don't.
 
-Env: SW_PROGID (default SldWorks.Application).
+Env: SW_RUN_TIMEOUT (seconds, default 60, 0 = none), SW_PROGID (default SldWorks.Application).
 """
 
 import hashlib
@@ -37,11 +37,16 @@ import os
 import re
 import sys
 import tempfile
+import threading
 import time
 import traceback
 from types import SimpleNamespace
 
 PROGID = os.environ.get("SW_PROGID", "SldWorks.Application")
+try:
+    TIMEOUT = float(os.environ.get("SW_RUN_TIMEOUT", "60"))
+except ValueError:
+    TIMEOUT = 60.0
 
 SCRIPT = "<sw_run>"
 CACHE_DIR = os.path.join(tempfile.gettempdir(), "sw_run_cache")
@@ -494,6 +499,25 @@ def run(code, swApp, enums, api_path):
         return 1
 
 
+def _start_watchdog():
+    if TIMEOUT <= 0:
+        return
+
+    def fire():
+        try:
+            sys.stdout.write(
+                f"\nERROR: Timeout after {TIMEOUT:g}s - SolidWorks may be showing a modal dialog or still "
+                "be working. Set SW_RUN_TIMEOUT=<seconds> for long operations.\n"
+            )
+            sys.stdout.flush()
+        finally:
+            os._exit(1)
+
+    t = threading.Timer(TIMEOUT, fire)
+    t.daemon = True
+    t.start()
+
+
 def read_code():
     if len(sys.argv) == 2:
         return sys.argv[1]
@@ -524,6 +548,7 @@ def main():
         except (AttributeError, ValueError):
             pass
 
+    _start_watchdog()
     swApp = connect()
     enums, api_path = {}, None
     try:

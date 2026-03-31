@@ -13,7 +13,7 @@ print(swApp.RevisionNumber(), model.GetTitle() if model else "no document open")
 EOF
 ```
 
-One-liners: `sw_run.py 'print(model.GetPathName())'` · files: `sw_run.py < script.py`.
+One-liners: `sw_run.py 'print(model.GetPathName())'` · files: `sw_run.py < script.py` · 60s timeout, `SW_RUN_TIMEOUT=600` for big opens/rebuilds.
 
 Globals: `swApp` (ISldWorks) · `model` (ActiveDoc at start, `None` if nothing open) · `swconst` (every enum: `swconst.swDocPART`) · `api(q)` · `byref(v)` · `NOTHING` · `arr(seq)`.
 
@@ -25,6 +25,7 @@ Globals: `swApp` (ISldWorks) · `model` (ActiveDoc at start, `None` if nothing o
 - Failures usually return `None`/`False`/an error code instead of raising: check returns.
 - Features and edit commands act on the **selection**: `model.ClearSelection2(True)`, select, then call.
 - `model` isn't refreshed: re-read `swApp.ActiveDoc` after open/new/activate. Each run is a fresh process; only SolidWorks state persists.
+- A modal dialog in SolidWorks blocks every call until the timeout — ask the user to close it.
 
 ## Perceive
 
