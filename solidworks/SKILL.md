@@ -5,7 +5,7 @@ description: Control SolidWorks via its COM API from Python. Run arbitrary Pytho
 
 # SolidWorks Skill
 
-Run Python against the running SolidWorks (COM via pywin32). `print()` output comes back; on error you get exit code 1 and the script traceback.
+Run Python against the running SolidWorks (COM via pywin32). `print()` output comes back; on error you get exit code 1, the script traceback and a `hint:`.
 
 ```bash
 python ~/.claude/skills/solidworks/sw_run.py <<'EOF'

@@ -57,7 +57,22 @@ METHODS = set()
 
 MK_E_UNAVAILABLE = 0x800401E3
 BUSY = (0x80010001, 0x8001010A)  # RPC_E_CALL_REJECTED, RPC_E_SERVERCALL_RETRYLATER
+TYPE_MISMATCH, PARAM_NOT_FOUND = 0x80020005, 0x80020004
 DISP_E_EXCEPTION, RPC_E_SERVERFAULT = 0x80020009, 0x80010105
+_NEVER_OPTIONAL = "SolidWorks API arguments are never optional - pass every one."
+_GONE = "SolidWorks is not reachable (closed or crashed)."
+HINTS = {
+    TYPE_MISMATCH: "type mismatch - ByRef/out args need byref(...), 'Nothing' args need NOTHING, array args need arr([...]).",
+    PARAM_NOT_FOUND: _NEVER_OPTIONAL,
+    0x8002000E: _NEVER_OPTIONAL,  # DISP_E_BADPARAMCOUNT
+    0x80020003: "member not found - a property called with (), or the member isn't on this object type.",
+    RPC_E_SERVERFAULT: "SolidWorks failed inside the call - bad arguments, wrong document type, or nothing/wrong thing selected.",
+    BUSY[0]: "SolidWorks is busy (modal dialog open, or still loading) - dismiss it / retry.",
+    BUSY[1]: "SolidWorks is busy (modal dialog open, or still loading) - dismiss it / retry.",
+    0x80010108: _GONE,  # RPC_E_DISCONNECTED
+    0x800706BA: _GONE,  # RPC_S_SERVER_UNAVAILABLE
+    0x800706BE: _GONE,  # RPC_S_CALL_FAILED
+}
 
 
 def die(msg):
@@ -421,6 +436,37 @@ def load_typelib_info(swApp):
 
 # --- running the script ----------------------------------------------------------
 
+def hint(e):
+    if isinstance(e, pythoncom.com_error):
+        hr = e.args[0] & 0xFFFFFFFF
+        h = HINTS.get(hr)
+        if hr == DISP_E_EXCEPTION:
+            excep = e.args[2] or ()
+            inner = excep[5] & 0xFFFFFFFF if len(excep) > 5 and excep[5] else None
+            h = HINTS.get(inner, "SolidWorks rejected the call - check arguments and state against api(...).")
+        argerr = e.args[3] if len(e.args) > 3 else None
+        if h and argerr is not None and hr in (TYPE_MISMATCH, PARAM_NOT_FOUND):
+            h = f"argument {argerr}: {h}"
+        return h
+    if isinstance(e, TypeError) and "not callable" in str(e):
+        return "a property (or an already-evaluated value) was called with () - drop the ()."
+    if isinstance(e, AttributeError) and "'NoneType'" in str(e):
+        return ("an API call returned None - no active document, nothing selected, wrong name, "
+                "or the operation failed (check return values).")
+    return None
+
+
+def report(e):
+    frames = [f for f in traceback.extract_tb(e.__traceback__) if f.filename == SCRIPT]
+    out = "".join(traceback.format_exception_only(type(e), e))
+    if frames:
+        out = "Traceback (most recent call last):\n" + "".join(traceback.format_list(frames)) + out
+    print(out, end="")
+    h = hint(e)
+    if h:
+        print("hint: " + h)
+
+
 def run(code, swApp, enums, api_path):
     linecache.cache[SCRIPT] = (len(code), None, code.splitlines(True), SCRIPT)
     ns = {
@@ -444,7 +490,7 @@ def run(code, swApp, enums, api_path):
         print(e.code)
         return 1
     except BaseException as e:
-        traceback.print_exc()
+        report(e)
         return 1
 
 
