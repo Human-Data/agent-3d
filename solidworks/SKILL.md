@@ -47,7 +47,55 @@ while f:
     f = f.GetNextFeature()
 ```
 
+Geometry:
+```python
+mp = model.Extension.CreateMassProperty()
+print(mp.Mass, mp.Volume, mp.SurfaceArea, mp.CenterOfMass)                  # kg, m3, m2, m
+print(model.GetPartBox(True) if model.GetType() == 1 else model.GetBox(0))  # x1,y1,z1,x2,y2,z2
+for b in model.GetBodies2(swconst.swSolidBody, True) or (): print(b.Name, len(b.GetFaces()), "faces")
+```
+
+Assembly components (`False` = all levels; translation in m):
+```python
+for c in model.GetComponents(False) or ():
+    t = c.Transform2
+    print(c.Name2, c.ReferencedConfiguration, c.IsSuppressed(), t.ArrayData[9:12] if t else None, c.GetPathName())
+```
+
+What the user selected:
+```python
+sm = model.SelectionManager
+for i in range(1, sm.GetSelectedObjectCount2(-1) + 1):
+    print(sm.GetSelectedObjectType3(i, -1), sm.GetSelectionPoint2(i, -1))   # decode: api("swSelectType_e")
+obj = sm.GetSelectedObject6(1, -1)                                           # IFace2 / IEdge / IFeature / IComponent2 ...
+```
+
+Custom properties: `cpm = model.Extension.CustomPropertyManager("")` (`""` = file, or a config name) → `cpm.GetNames()`, `cpm.Get(name)`.
+
+Look — render the view, then Read the PNG (works for drawings too):
+```python
+import os; p = os.path.join(os.environ["TEMP"], "sw_view.png")
+model.ShowNamedView2("*Isometric", 7); model.ViewZoomtofit2()
+e, w = byref(0), byref(0)
+print(model.Extension.SaveAs(p, 0, 3, NOTHING, e, w), e.value, p)   # 3 = silent|copy
+```
+
 ## Act
+
+New part → sketch → extrude:
+```python
+m = swApp.NewDocument(swApp.GetUserPreferenceStringValue(swconst.swDefaultTemplatePart), 0, 0, 0)
+m.Extension.SelectByID2("Front Plane", "PLANE", 0, 0, 0, False, 0, NOTHING, 0)
+sk = m.SketchManager; sk.AddToDB = True              # no snapping to nearby geometry
+sk.InsertSketch(True)                                # open a sketch on the selected plane
+sk.CreateCenterRectangle(0, 0, 0, 0.05, 0.025, 0)    # center, corner
+sk.CreateCircleByRadius(0, 0, 0, 0.01)
+sk.InsertSketch(True)                                # close it
+m.ClearSelection2(True); m.FeatureByPositionReverse(0).Select2(False, 0)   # select the new sketch
+f = m.FeatureManager.FeatureExtrusion2(True, False, False, swconst.swEndCondBlind, 0, 0.02, 0, False, False,
+        False, False, 0, 0, False, False, False, False, True, True, True, 0, 0, False)
+print(f.Name if f else "extrude failed")
+```
 
 Edit:
 ```python
@@ -57,3 +105,18 @@ model.Extension.SelectByID2("", "FACE", 0.01, 0.02, 0, False, 0, NOTHING, 0)   #
 model.EditUndo2(1)
 ```
 SelectByID2 types: `PLANE FACE EDGE VERTEX SKETCH SKETCHSEGMENT BODYFEATURE COMPONENT ("Part1-1@Assem1") DIMENSION DRAWINGVIEW`.
+
+Files:
+```python
+e, w = byref(0), byref(0)
+m = swApp.OpenDoc6(r"C:\p\part.SLDPRT", swconst.swDocPART, swconst.swOpenDocOptions_Silent, "", e, w)   # None → e.value
+model.Save3(swconst.swSaveAsOptions_Silent, e, w)
+model.Extension.SaveAs(r"C:\p\part.step", 0, 3, NOTHING, e, w)    # format from extension: step stl x_t pdf dxf png
+swApp.CloseDoc(model.GetTitle())
+```
+
+Assemblies: `AddComponent5` (open the file first), mates via `AddMate5` on the selected pair. Drawings: `CreateDrawViewFromModelView3`. Signatures: `api(...)`.
+
+## Setup
+
+Windows only: native Windows Python (not WSL) + `python -m pip install pywin32`. Start SolidWorks first; `sw_run.py` attaches to the running instance and never launches one. The first run indexes SolidWorks' type library into `%TEMP%\sw_run_cache` (a few seconds). That index is what makes `()`, `swconst` and `api()` work.
