@@ -1,0 +1,65 @@
+---
+name: isaacsim
+description: Control NVIDIA Isaac Sim via Python. Run arbitrary Python (USD/pxr, omni, isaacsim APIs, top-level await) inside a running Isaac Sim to inspect and edit scenes, simulate physics and drive robots.
+---
+
+# Isaac Sim Skill
+
+Run Python inside a running Isaac Sim, on Kit's main thread between frames. `print()` output comes back. On error you get exit code 1 and the traceback.
+
+```bash
+python3 ~/.claude/skills/isaacsim/isaac_run.py <<'EOF'
+print(app.get_app_version(), stage.GetRootLayer().identifier)
+EOF
+```
+
+One-liners as a single argument; files via `< script.py`.
+
+Globals: `stage` · `ctx` (omni.usd context) · `app` · `timeline` · `omni` `carb` `np` · `Usd UsdGeom UsdPhysics UsdShade UsdLux Sdf Gf Vt` · `shared` (dict kept between runs).
+
+## Rules
+
+- Z-up, meters (check `UsdGeom.GetStageUpAxis(stage)`, `UsdGeom.GetStageMetersPerUnit(stage)`). Quaternions `(w, x, y, z)`. USD joint limits/drive targets are **degrees**; Isaac articulation APIs are **radians**.
+- `stage` is captured at run start: re-read `ctx.get_stage()` after opening/creating a stage. Physics handles die on `timeline.stop()`. Each run is a fresh namespace except `shared`.
+- Raw USD edits aren't undoable; `omni.kit.commands.execute(...)` ones are (`omni.kit.undo.undo()`).
+
+## Perceive
+
+Overview:
+```python
+print(app.get_app_name(), app.get_app_version(), ctx.get_stage_url())
+print(UsdGeom.GetStageUpAxis(stage), UsdGeom.GetStageMetersPerUnit(stage), timeline.is_playing(), timeline.get_current_time())
+print("selected:", ctx.get_selection().get_selected_prim_paths())
+```
+
+Scene tree — type + applied schemas (`PhysicsRigidBodyAPI`, `PhysicsCollisionAPI`, `PhysicsArticulationRootAPI`…):
+```python
+it = iter(Usd.PrimRange(stage.GetPseudoRoot()))
+for p in it:
+    d = p.GetPath().pathElementCount
+    if d > 4: it.PruneChildren(); continue
+    print("  " * d + p.GetName(), p.GetTypeName(), p.GetAppliedSchemas() or "")
+```
+
+One prim:
+```python
+p = stage.GetPrimAtPath("/World/Box")
+for a in p.GetAttributes():
+    if a.HasAuthoredValue(): print(a.GetName(), a.Get())
+print(omni.usd.get_world_transform_matrix(p).ExtractTranslation(), ctx.compute_path_world_bounding_box(str(p.GetPath())))
+```
+
+## Act
+
+Edit / files:
+```python
+import omni.kit.commands, omni.kit.undo
+omni.kit.commands.execute("DeletePrims", paths=["/World/Box"]); omni.kit.undo.undo()
+ctx.open_stage("/path/scene.usd"); stage = ctx.get_stage()   # ctx.new_stage() · ctx.save_as_stage("/path/out.usd")
+```
+
+## Setup
+
+Start the bridge inside Isaac Sim once per session (listens on 127.0.0.1:8723):
+- At launch: `isaac-sim.sh --exec ~/.claude/skills/isaacsim/isaac_bridge.py` (Windows `isaac-sim.bat`; any Kit app takes `--exec`).
+- Already open: Window → Script Editor → `exec(open("/abs/path/to/isaac_bridge.py").read())`.
