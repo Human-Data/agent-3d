@@ -5,7 +5,7 @@ description: Control NVIDIA Isaac Sim via Python. Run arbitrary Python (USD/pxr,
 
 # Isaac Sim Skill
 
-Run Python inside a running Isaac Sim, on Kit's main thread between frames. `print()` output comes back. On error you get exit code 1 and the traceback.
+Run Python inside a running Isaac Sim, on Kit's main thread between frames. `print()` output comes back. On error you get exit code 1, the traceback, and any Kit log errors raised during the run.
 
 ```bash
 python3 ~/.claude/skills/isaacsim/isaac_run.py <<'EOF'

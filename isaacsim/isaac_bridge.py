@@ -31,6 +31,7 @@ HOST = os.environ.get("ISAAC_BRIDGE_HOST", "127.0.0.1")
 PORT = int(os.environ.get("ISAAC_BRIDGE_PORT", "8723"))
 SCRIPT = "<isaac_run>"
 STALE_SECONDS = 60  # drop connections that never finish sending
+MAX_LOG_LINES = 20
 
 # exposed to scripts as `shared`; kept on `sys` so it survives runs and bridge restarts
 SHARED = getattr(sys, "_isaac_bridge_shared", None)
@@ -73,6 +74,42 @@ def _install_router():
             continue
         base = cur.fallback if getattr(cur, "_isaac_bridge_router", False) else cur  # a previous bridge's router
         setattr(sys, name, _Router(base))
+
+
+class _LogCapture:
+    """Collect Kit (carb) log errors emitted while a request runs - physics/USD/renderer
+    failures often only show up there, not as Python exceptions."""
+
+    def __init__(self):
+        self.lines, self.iface, self.handle = [], None, None
+        try:
+            import carb
+
+            self.error_level = getattr(carb.logging, "LEVEL_ERROR", 1)
+            self.iface = carb.logging.acquire_logging()
+            self.handle = self.iface.add_logger(self._on_log)
+        except Exception:
+            self.iface = None
+
+    def _on_log(self, *args):  # (source, level, filename, line, message) - tolerate variants
+        try:
+            level = next(a for a in args if isinstance(a, int))
+            if level < self.error_level:
+                return
+            source = args[0] if args and isinstance(args[0], str) else ""
+            line = f"[{source}] {str(args[-1]).strip()}"
+            if line not in self.lines and len(self.lines) < MAX_LOG_LINES:
+                self.lines.append(line)
+        except Exception:
+            pass
+
+    def stop(self):
+        if self.iface is not None and self.handle is not None:
+            try:
+                self.iface.remove_logger(self.handle)
+            except Exception:
+                pass
+        return self.lines
 
 
 # --- helpers exposed to scripts ------------------------------------------------------
@@ -186,6 +223,7 @@ class _Timeout(Exception):
 async def _execute(code, timeout):
     buf = io.StringIO()
     token = _OUT.set(buf)
+    logs = _LogCapture()
     ok = False
     try:
         _install_router()
@@ -208,7 +246,13 @@ async def _execute(code, timeout):
         buf.write(_format_error(e))
     finally:
         _OUT.reset(token)
-    return ok, buf.getvalue()
+        errors = logs.stop()
+    out = buf.getvalue()
+    if errors:
+        if out and not out.endswith("\n"):
+            out += "\n"
+        out += "--- Isaac Sim log errors during this run ---\n" + "\n".join(errors) + "\n"
+    return ok, out
 
 
 class Bridge:
