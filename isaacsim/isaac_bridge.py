@@ -23,6 +23,7 @@ import linecache
 import os
 import socket
 import sys
+import tempfile
 import time
 import traceback
 
@@ -85,8 +86,58 @@ async def frames(n=1):
         await app.next_update_async()
 
 
+async def screenshot(path=None, settle=3):
+    """Capture the active viewport to a PNG and return its path."""
+    from omni.kit.viewport.utility import capture_viewport_to_file, get_active_viewport
+
+    vp = get_active_viewport()
+    if vp is None:
+        raise RuntimeError("no active viewport (headless?) - render a camera with omni.replicator.core instead")
+    path = os.path.abspath(path or os.path.join(tempfile.gettempdir(), "isaac_view.png"))
+    if os.path.exists(path):
+        os.remove(path)
+    await frames(settle)  # let the renderer catch up with recent edits
+    cap = capture_viewport_to_file(vp, path)
+    waiter = getattr(cap, "wait_for_result", None)
+    if waiter is not None:
+        res = waiter()
+        if inspect.isawaitable(res):
+            await res
+    for _ in range(300):
+        if os.path.isfile(path) and os.path.getsize(path) > 0:
+            return path
+        await frames(1)
+    raise RuntimeError(f"viewport capture produced no file at {path}")
+
+
+def set_view(eye, target, camera="/OmniverseKit_Persp"):
+    """Point a camera (default: the viewport's perspective camera) from eye at target, in stage units."""
+    from pxr import Gf, Usd, UsdGeom
+
+    eye, target = Gf.Vec3d(*eye), Gf.Vec3d(*target)
+    try:
+        from omni.kit.viewport.utility import get_active_viewport
+        from omni.kit.viewport.utility.camera_state import ViewportCameraState
+
+        state = ViewportCameraState(camera, get_active_viewport())
+        state.set_position_world(eye, True)
+        state.set_target_world(target, True)
+        return
+    except ImportError:
+        pass
+    import omni.usd  # fallback: write a look-at transform into the session layer (not saved with the scene)
+
+    stage = omni.usd.get_context().get_stage()
+    up = Gf.Vec3d(0, 0, 1) if UsdGeom.GetStageUpAxis(stage) == UsdGeom.Tokens.z else Gf.Vec3d(0, 1, 0)
+    with Usd.EditContext(stage, stage.GetSessionLayer()):
+        xf = UsdGeom.Xformable(stage.GetPrimAtPath(camera))
+        xf.ClearXformOpOrder()
+        xf.AddTransformOp().Set(Gf.Matrix4d().SetLookAt(eye, target, up).GetInverse())
+
+
 def _namespace():
-    ns = {"__name__": "__isaac_run__", "shared": SHARED, "frames": frames}
+    ns = {"__name__": "__isaac_run__", "shared": SHARED, "frames": frames, "screenshot": screenshot,
+          "set_view": set_view}
     try:
         import carb
         import omni.kit.app

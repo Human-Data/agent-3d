@@ -15,7 +15,7 @@ EOF
 
 One-liners as a single argument; files via `< script.py`. **Top-level `await` works**: use it whenever frames must pass. 60s timeout (`ISAAC_RUN_TIMEOUT=600`).
 
-Globals: `stage` · `ctx` (omni.usd context) · `app` · `timeline` · `omni` `carb` `np` · `Usd UsdGeom UsdPhysics UsdShade UsdLux Sdf Gf Vt` · `await frames(n)` · `shared` (dict kept between runs).
+Globals: `stage` · `ctx` (omni.usd context) · `app` · `timeline` · `omni` `carb` `np` · `Usd UsdGeom UsdPhysics UsdShade UsdLux Sdf Gf Vt` · `await frames(n)` · `set_view(eye, target)` · `await screenshot(path=None)` · `shared` (dict kept between runs).
 
 ## Rules
 
@@ -49,6 +49,13 @@ for a in p.GetAttributes():
     if a.HasAuthoredValue(): print(a.GetName(), a.Get())
 print(omni.usd.get_world_transform_matrix(p).ExtractTranslation(), ctx.compute_path_world_bounding_box(str(p.GetPath())))
 ```
+
+Look — then Read the PNG:
+```python
+set_view(eye=[2.5, 2.5, 1.8], target=[0, 0, 0.5])
+print(await screenshot())   # <tmp>/isaac_view.png
+```
+Through a scene camera: `from omni.kit.viewport.utility import get_active_viewport; get_active_viewport().camera_path = "/World/Camera"`.
 
 ## Act
 
