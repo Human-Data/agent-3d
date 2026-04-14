@@ -2,19 +2,21 @@
 Claude Bridge for Isaac Sim - runs Python sent by isaac_run.py inside Isaac Sim.
 
 Listens on 127.0.0.1:8723 (env ISAAC_BRIDGE_HOST / ISAAC_BRIDGE_PORT) and runs each
-request on Kit's main thread between frames.
+request on Kit's main thread between frames. Scripts may use top-level `await`.
 
 Start it any one way:
     isaac-sim.sh --exec /path/to/isaac_bridge.py                 # at launch
     exec(open("/path/to/isaac_bridge.py").read())                # Window > Script Editor
 
 Re-running it restarts the bridge. Protocol: the client sends one JSON object
-{"code": str} and closes its write side; the bridge replies
+{"code": str, "timeout": seconds} and closes its write side; the bridge replies
 {"ok": bool, "output": str} and closes.
 """
 
+import ast
 import asyncio
 import contextvars
+import inspect
 import io
 import json
 import linecache
@@ -72,8 +74,19 @@ def _install_router():
         setattr(sys, name, _Router(base))
 
 
+# --- helpers exposed to scripts ------------------------------------------------------
+
+async def frames(n=1):
+    """Let n app updates (rendered frames / physics steps while playing) pass."""
+    import omni.kit.app
+
+    app = omni.kit.app.get_app()
+    for _ in range(int(n)):
+        await app.next_update_async()
+
+
 def _namespace():
-    ns = {"__name__": "__isaac_run__", "shared": SHARED}
+    ns = {"__name__": "__isaac_run__", "shared": SHARED, "frames": frames}
     try:
         import carb
         import omni.kit.app
@@ -115,15 +128,29 @@ def _format_error(e):
     return out
 
 
-async def _execute(code):
+class _Timeout(Exception):
+    pass
+
+
+async def _execute(code, timeout):
     buf = io.StringIO()
     token = _OUT.set(buf)
     ok = False
     try:
         _install_router()
         linecache.cache[SCRIPT] = (len(code), None, code.splitlines(True), SCRIPT)
-        exec(compile(code, SCRIPT, "exec"), _namespace())
+        compiled = compile(code, SCRIPT, "exec", flags=ast.PyCF_ALLOW_TOP_LEVEL_AWAIT)
+        result = eval(compiled, _namespace())  # a coroutine if the code used top-level await
+        if inspect.iscoroutine(result):
+            task = asyncio.ensure_future(result)  # inherits this context -> output still captured
+            done, _ = await asyncio.wait({task}, timeout=timeout if timeout and timeout > 0 else None)
+            if not done:
+                task.cancel()
+                raise _Timeout()
+            task.result()  # re-raise the script's own exception, if any
         ok = True
+    except _Timeout:
+        buf.write(f"ERROR: script still running after {timeout:g}s - cancelled (ISAAC_RUN_TIMEOUT to raise)\n")
     except SystemExit as e:
         ok = e.code in (None, 0)
     except BaseException as e:  # never let a script take the bridge (or Kit) down
@@ -190,7 +217,7 @@ class Bridge:
     async def _handle(self, conn, raw):
         try:
             req = json.loads(raw.decode("utf-8"))
-            ok, out = await _execute(req["code"])
+            ok, out = await _execute(req["code"], float(req.get("timeout") or 0))
         except Exception as e:
             ok, out = False, f"ERROR: bad request: {e}\n"
         try:

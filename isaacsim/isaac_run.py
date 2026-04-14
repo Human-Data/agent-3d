@@ -5,12 +5,12 @@ Run Python code in a live Isaac Sim (via the Claude Bridge, isaac_bridge.py).
 Usage:
     isaac_run.py 'print(stage.GetRootLayer().identifier)'   # one-liner argument
     isaac_run.py <<'EOF'                                     # multi-line heredoc
-    for p in stage.Traverse():
-        print(p.GetPath())
+    timeline.play()
+    await frames(60)
     EOF
     isaac_run.py < script.py                                 # from a file
 
-Env: ISAAC_BRIDGE_HOST (127.0.0.1), ISAAC_BRIDGE_PORT (8723).
+Env: ISAAC_BRIDGE_HOST (127.0.0.1), ISAAC_BRIDGE_PORT (8723), ISAAC_RUN_TIMEOUT (60s, 0 = none).
 """
 
 import json
@@ -20,6 +20,10 @@ import sys
 
 HOST = os.environ.get("ISAAC_BRIDGE_HOST", "127.0.0.1")
 PORT = int(os.environ.get("ISAAC_BRIDGE_PORT", "8723"))
+try:
+    TIMEOUT = float(os.environ.get("ISAAC_RUN_TIMEOUT", "60"))
+except ValueError:
+    TIMEOUT = 60.0
 
 START_HINT = ("Start it inside Isaac Sim: launch with `isaac-sim.sh --exec ~/.claude/skills/isaacsim/isaac_bridge.py`,"
               " or run exec(open('<path>/isaac_bridge.py').read()) in Window > Script Editor.")
@@ -52,10 +56,15 @@ def main():
 
     s = connect()
     with s:
-        s.sendall(json.dumps({"code": code}).encode("utf-8"))
+        s.sendall(json.dumps({"code": code, "timeout": TIMEOUT}).encode("utf-8"))
         s.shutdown(socket.SHUT_WR)
-        s.settimeout(None)
-        data = _recv_all(s)
+        # the bridge cancels async scripts at TIMEOUT; the margin covers a busy/frozen main thread
+        s.settimeout(TIMEOUT + 15 if TIMEOUT > 0 else None)
+        try:
+            data = _recv_all(s)
+        except socket.timeout:
+            sys.exit(f"ERROR: Timeout - no reply after {TIMEOUT + 15:g}s. Isaac Sim's main thread is busy or frozen"
+                     " (a long synchronous loop?). Set ISAAC_RUN_TIMEOUT for long operations.")
     if not data:
         sys.exit("ERROR: bridge closed the connection without a reply (Isaac Sim shutting down?)")
     resp = json.loads(data.decode("utf-8"))

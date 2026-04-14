@@ -13,13 +13,14 @@ print(app.get_app_version(), stage.GetRootLayer().identifier)
 EOF
 ```
 
-One-liners as a single argument; files via `< script.py`.
+One-liners as a single argument; files via `< script.py`. **Top-level `await` works**: use it whenever frames must pass. 60s timeout (`ISAAC_RUN_TIMEOUT=600`).
 
-Globals: `stage` · `ctx` (omni.usd context) · `app` · `timeline` · `omni` `carb` `np` · `Usd UsdGeom UsdPhysics UsdShade UsdLux Sdf Gf Vt` · `shared` (dict kept between runs).
+Globals: `stage` · `ctx` (omni.usd context) · `app` · `timeline` · `omni` `carb` `np` · `Usd UsdGeom UsdPhysics UsdShade UsdLux Sdf Gf Vt` · `await frames(n)` · `shared` (dict kept between runs).
 
 ## Rules
 
 - Z-up, meters (check `UsdGeom.GetStageUpAxis(stage)`, `UsdGeom.GetStageMetersPerUnit(stage)`). Quaternions `(w, x, y, z)`. USD joint limits/drive targets are **degrees**; Isaac articulation APIs are **radians**.
+- Physics advances only while the timeline plays **and** frames pass: `timeline.play(); await frames(60)` ≈ 1 s. A long synchronous loop freezes the app — `await frames(1)` inside it.
 - `stage` is captured at run start: re-read `ctx.get_stage()` after opening/creating a stage. Physics handles die on `timeline.stop()`. Each run is a fresh namespace except `shared`.
 - Raw USD edits aren't undoable; `omni.kit.commands.execute(...)` ones are (`omni.kit.undo.undo()`).
 
@@ -55,7 +56,7 @@ Edit / files:
 ```python
 import omni.kit.commands, omni.kit.undo
 omni.kit.commands.execute("DeletePrims", paths=["/World/Box"]); omni.kit.undo.undo()
-ctx.open_stage("/path/scene.usd"); stage = ctx.get_stage()   # ctx.new_stage() · ctx.save_as_stage("/path/out.usd")
+await ctx.open_stage_async("/path/scene.usd"); stage = ctx.get_stage()   # ctx.new_stage() · ctx.save_as_stage("/path/out.usd")
 ```
 
 ## Setup
