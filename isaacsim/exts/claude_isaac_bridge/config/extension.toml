@@ -1,0 +1,9 @@
+[package]
+version = "1.0.0"
+title = "Claude Bridge"
+description = "Runs Python sent by isaac_run.py (Claude skill) on Kit's main thread. Listens on 127.0.0.1:8723."
+category = "Internal"
+keywords = ["claude", "bridge", "python", "remote"]
+
+[[python.module]]
+name = "claude_isaac_bridge"

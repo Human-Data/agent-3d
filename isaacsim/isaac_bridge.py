@@ -7,6 +7,7 @@ request on Kit's main thread between frames. Scripts may use top-level `await`.
 Start it any one way:
     isaac-sim.sh --exec /path/to/isaac_bridge.py                 # at launch
     exec(open("/path/to/isaac_bridge.py").read())                # Window > Script Editor
+    isaac-sim.sh --ext-folder /path/to/exts --enable claude_isaac_bridge   # as an extension
 
 Re-running it restarts the bridge. Protocol: the client sends one JSON object
 {"code": str, "timeout": seconds} and closes its write side; the bridge replies
@@ -363,4 +364,5 @@ def stop():
         sys._isaac_bridge = None
 
 
-start()
+if __name__ != "isaac_bridge":  # run via --exec / Script Editor (the extension imports it instead)
+    start()
