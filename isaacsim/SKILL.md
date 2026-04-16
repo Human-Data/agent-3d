@@ -72,3 +72,4 @@ Start the bridge inside Isaac Sim once per session (listens on 127.0.0.1:8723):
 - At launch: `isaac-sim.sh --exec ~/.claude/skills/isaacsim/isaac_bridge.py` (Windows `isaac-sim.bat`; any Kit app takes `--exec`).
 - Already open: Window → Script Editor → `exec(open("/abs/path/to/isaac_bridge.py").read())`.
 - Autostart: add `~/.claude/skills/isaacsim/exts` to the Extension Manager search paths, then enable `claude_isaac_bridge` with Autoload (or launch with `--ext-folder <that dir> --enable claude_isaac_bridge`).
+- If Isaac Sim's Python Server extension (`isaacsim.code_editor.python_server`, port 8226) is enabled, `isaac_run.py` starts the bridge through it automatically.

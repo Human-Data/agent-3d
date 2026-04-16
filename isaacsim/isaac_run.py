@@ -10,16 +10,23 @@ Usage:
     EOF
     isaac_run.py < script.py                                 # from a file
 
-Env: ISAAC_BRIDGE_HOST (127.0.0.1), ISAAC_BRIDGE_PORT (8723), ISAAC_RUN_TIMEOUT (60s, 0 = none).
+If the bridge isn't running but Isaac Sim's own Python server extension is
+(isaacsim.code_editor.python_server, port 8226), the bridge is started through it.
+
+Env: ISAAC_BRIDGE_HOST (127.0.0.1), ISAAC_BRIDGE_PORT (8723), ISAAC_RUN_TIMEOUT (60s, 0 = none),
+     ISAAC_PYTHON_SERVER_PORT (8226, 0 = never bootstrap).
 """
 
 import json
 import os
 import socket
 import sys
+import time
 
 HOST = os.environ.get("ISAAC_BRIDGE_HOST", "127.0.0.1")
 PORT = int(os.environ.get("ISAAC_BRIDGE_PORT", "8723"))
+BOOT_PORT = int(os.environ.get("ISAAC_PYTHON_SERVER_PORT", "8226"))
+BRIDGE_PY = os.path.join(os.path.dirname(os.path.abspath(__file__)), "isaac_bridge.py")
 try:
     TIMEOUT = float(os.environ.get("ISAAC_RUN_TIMEOUT", "60"))
 except ValueError:
@@ -38,12 +45,39 @@ def _recv_all(s):
         chunks.append(chunk)
 
 
+def bootstrap():
+    """Start the bridge through Isaac Sim's built-in Python server, if that is enabled.
+    The bridge source is sent inline, so this also works for Docker / remote hosts."""
+    if BOOT_PORT <= 0:
+        return False
+    with open(BRIDGE_PY, encoding="utf-8") as f:
+        src = f.read()
+    code = f"exec(compile({src!r}, 'isaac_bridge.py', 'exec'), {{'__name__': '__main__'}})"
+    try:
+        with socket.create_connection((HOST, BOOT_PORT), timeout=3) as s:
+            s.sendall(code.encode("utf-8"))
+            s.shutdown(socket.SHUT_WR)
+            s.settimeout(30)
+            resp = json.loads(_recv_all(s).decode("utf-8"))
+    except (OSError, ValueError):
+        return False
+    return resp.get("status") == "ok"
+
+
 def connect():
     try:
         return socket.create_connection((HOST, PORT), timeout=5)
     except OSError as e:
-        sys.exit(f"ERROR: no Isaac Sim bridge at {HOST}:{PORT} ({e}). Isaac Sim still loading, or bridge not started. "
-                 + START_HINT)
+        err = e
+    if bootstrap():
+        for _ in range(50):
+            try:
+                return socket.create_connection((HOST, PORT), timeout=5)
+            except OSError as e:
+                err = e
+                time.sleep(0.1)
+    sys.exit(f"ERROR: no Isaac Sim bridge at {HOST}:{PORT} ({err}). Isaac Sim still loading, or bridge not started. "
+             + START_HINT)
 
 
 def main():
