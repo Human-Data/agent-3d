@@ -1,91 +1,65 @@
 #!/usr/bin/env python3
 """
-Send Python code to a running Blender instance via Claude Bridge addon.
+Run Python code in a live Blender instance (via the Claude Bridge addon).
+
+Usage:
+    blender_run.py 'print(bpy.context.scene.name)'   # one-liner argument
+    blender_run.py <<'EOF'                            # multi-line heredoc
+    for obj in bpy.context.scene.objects:
+        print(obj.name)
+    EOF
+    blender_run.py < script.py                        # from a file
 """
 
-import argparse
 import os
 import sys
 import tempfile
 import time
+import uuid
 
 BRIDGE_DIR = os.path.join(tempfile.gettempdir(), "blender_claude_bridge")
-CMD_FILE = os.path.join(BRIDGE_DIR, "command.py")
-RESULT_FILE = os.path.join(BRIDGE_DIR, "result.txt")
-LOCK_FILE = os.path.join(BRIDGE_DIR, "lock")
 
-TIMEOUT = 30  # seconds
-
-
-def run_code(code: str) -> tuple[str, int]:
-    """
-    Send code to Blender and wait for result.
-
-    Returns:
-        Tuple of (output, return_code)
-    """
-    os.makedirs(BRIDGE_DIR, exist_ok=True)
-
-    # Clean up old result
-    if os.path.exists(RESULT_FILE):
-        os.remove(RESULT_FILE)
-
-    # Create lock file
-    with open(LOCK_FILE, 'w') as f:
-        f.write("")
-
-    # Write command
-    with open(CMD_FILE, 'w') as f:
-        f.write(code)
-
-    # Wait for result
-    start = time.time()
-    while time.time() - start < TIMEOUT:
-        if os.path.exists(RESULT_FILE) and not os.path.exists(LOCK_FILE):
-            with open(RESULT_FILE, 'r') as f:
-                lines = f.read()
-
-            # Parse status
-            if lines.startswith("OK\n"):
-                return lines[3:], 0
-            elif lines.startswith("ERROR\n"):
-                return lines[6:], 1
-            else:
-                return lines, 0
-
-        time.sleep(0.05)
-
-    return "ERROR: Timeout - is Blender running with Claude Bridge addon enabled?", 1
+try:
+    TIMEOUT = float(os.environ.get("BLENDER_RUN_TIMEOUT", "30"))
+except ValueError:
+    TIMEOUT = 30.0
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Run Python code in Blender")
-    group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument("-c", "--code", help="Python code to execute")
-    group.add_argument("-f", "--file", help="Python file to execute")
+    if len(sys.argv) > 2:
+        sys.exit("usage: blender_run.py ['code']   (or pipe code via stdin/heredoc)")
+    code = sys.argv[1] if len(sys.argv) == 2 else sys.stdin.read()
+    if not code.strip():
+        sys.exit("error: no code given (pass as argument or via stdin)")
 
-    args = parser.parse_args()
+    os.makedirs(BRIDGE_DIR, exist_ok=True)
+    req_id = uuid.uuid4().hex
+    cmd_file = os.path.join(BRIDGE_DIR, f"cmd-{req_id}.py")
+    result_file = os.path.join(BRIDGE_DIR, f"result-{req_id}.txt")
 
-    if args.file:
-        with open(args.file, 'r') as f:
-            code = f.read()
-    else:
-        code = args.code
+    # temp + rename so the bridge can never read a half-written script
+    tmp = os.path.join(BRIDGE_DIR, f".cmd-{req_id}.tmp")
+    with open(tmp, "w") as f:
+        f.write(code)
+    os.replace(tmp, cmd_file)
 
-    # Fix shell escaping artifacts - when passing code via bash single quotes,
-    # escaped quotes \" are passed literally but break Python f-string expressions.
-    # Only convert \" to ' inside f-string curly brace expressions {}.
-    import re
-    def fix_fstring_escapes(match):
-        # Replace \" with ' only inside the f-string expression
-        return match.group(0).replace('\\"', "'")
-    # Match content inside {} that might contain escaped quotes
-    # This pattern finds {expressions} and fixes escapes within them
-    code = re.sub(r'\{[^{}]*\\\"[^{}]*\}', fix_fstring_escapes, code)
+    deadline = time.time() + TIMEOUT
+    while time.time() < deadline:
+        if os.path.exists(result_file):
+            with open(result_file) as f:
+                result = f.read()
+            os.remove(result_file)
+            status, _, output = result.partition("\n")
+            print(output, end="" if output.endswith("\n") or not output else "\n")
+            sys.exit(1 if status == "ERROR" else 0)
+        time.sleep(0.05)
 
-    output, returncode = run_code(code)
-    print(output, end="" if output.endswith("\n") else "\n")
-    sys.exit(returncode)
+    try:  # don't leave the command to run whenever Blender next starts
+        os.remove(cmd_file)
+    except OSError:
+        pass
+    sys.exit("ERROR: Timeout - is Blender running with the Claude Bridge addon enabled?"
+             " (setup: ~/.claude/skills/blender/install.sh)")
 
 
 if __name__ == "__main__":

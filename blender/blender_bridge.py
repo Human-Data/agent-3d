@@ -1,12 +1,13 @@
 """
 Claude Bridge - Minimal Blender addon for external code execution.
-Watches a command file and executes Python code sent from outside.
+Watches the bridge dir for cmd-<id>.py files and writes result-<id>.txt.
+Per-request ids correlate responses; writes are atomic (temp + rename).
 """
 
 bl_info = {
     "name": "Claude Bridge",
     "author": "Claude",
-    "version": (1, 0),
+    "version": (2, 0),
     "blender": (3, 0, 0),
     "location": "Runs in background",
     "description": "Execute Python code from external scripts",
@@ -14,68 +15,57 @@ bl_info = {
 }
 
 import bpy
+import io
 import os
+import sys
 import tempfile
+import time
 import traceback
 
-# Communication files
 BRIDGE_DIR = os.path.join(tempfile.gettempdir(), "blender_claude_bridge")
-CMD_FILE = os.path.join(BRIDGE_DIR, "command.py")
-RESULT_FILE = os.path.join(BRIDGE_DIR, "result.txt")
-LOCK_FILE = os.path.join(BRIDGE_DIR, "lock")
-
-
-def ensure_bridge_dir():
-    os.makedirs(BRIDGE_DIR, exist_ok=True)
+STALE_SECONDS = 60  # GC unclaimed commands/results older than this
 
 
 def execute_command():
-    """Check for and execute pending commands."""
-    if not os.path.exists(CMD_FILE):
-        return 0.1  # Check every 100ms
-
+    """Poll for cmd-<id>.py files, exec each, write result-<id>.txt."""
     try:
-        # Read command
-        with open(CMD_FILE, 'r') as f:
-            code = f.read()
+        for fname in sorted(os.listdir(BRIDGE_DIR)):
+            path = os.path.join(BRIDGE_DIR, fname)
+            stale = time.time() - os.path.getmtime(path) > STALE_SECONDS
+            if fname.startswith("result-") and fname.endswith(".txt"):
+                if stale:  # client gave up; nobody will read it
+                    os.remove(path)
+                continue
+            if not (fname.startswith("cmd-") and fname.endswith(".py")):
+                continue
+            if stale:  # e.g. sent while Blender was closed; don't run it late
+                os.remove(path)
+                continue
 
-        # Remove command file immediately
-        os.remove(CMD_FILE)
+            with open(path) as f:
+                code = f.read()
+            os.remove(path)
+            req_id = fname[len("cmd-"):-len(".py")]
 
-        # Execute code
-        output_lines = []
+            buf = io.StringIO()
+            old_out, old_err = sys.stdout, sys.stderr
+            sys.stdout = sys.stderr = buf
+            try:
+                exec(code, {"bpy": bpy, "__builtins__": __builtins__})
+                status = "OK"
+            except BaseException as e:  # SystemExit too — must never kill the timer
+                buf.write(f"ERROR: {e}\n{traceback.format_exc()}")
+                status = "ERROR"
+            finally:
+                sys.stdout, sys.stderr = old_out, old_err
 
-        # Capture print output
-        import io
-        import sys
-        old_stdout = sys.stdout
-        sys.stdout = io.StringIO()
-
-        try:
-            # Execute with bpy available
-            exec(code, {"bpy": bpy, "__builtins__": __builtins__})
-            output = sys.stdout.getvalue()
-            output_lines.append(output)
-            status = "OK"
-        except Exception as e:
-            output_lines.append(f"ERROR: {e}\n{traceback.format_exc()}")
-            status = "ERROR"
-        finally:
-            sys.stdout = old_stdout
-
-        # Write result
-        with open(RESULT_FILE, 'w') as f:
-            f.write(f"{status}\n")
-            f.write("\n".join(output_lines))
-
-        # Signal completion
-        if os.path.exists(LOCK_FILE):
-            os.remove(LOCK_FILE)
-
+            tmp = os.path.join(BRIDGE_DIR, f".result-{req_id}.tmp")
+            with open(tmp, "w") as f:
+                f.write(f"{status}\n{buf.getvalue()}")
+            os.replace(tmp, os.path.join(BRIDGE_DIR, f"result-{req_id}.txt"))
     except Exception as e:
         print(f"Claude Bridge error: {e}")
-
-    return 0.1
+    return 0.1  # always reschedule; a raising callback would unregister the timer
 
 
 class ClaudeBridgeOperator(bpy.types.Operator):
@@ -84,16 +74,16 @@ class ClaudeBridgeOperator(bpy.types.Operator):
     bl_label = "Start Claude Bridge"
 
     def execute(self, context):
-        ensure_bridge_dir()
-        bpy.app.timers.register(execute_command, persistent=True)
+        os.makedirs(BRIDGE_DIR, exist_ok=True)
+        if not bpy.app.timers.is_registered(execute_command):
+            bpy.app.timers.register(execute_command, persistent=True)
         self.report({'INFO'}, f"Claude Bridge listening at {BRIDGE_DIR}")
         return {'FINISHED'}
 
 
 def register():
     bpy.utils.register_class(ClaudeBridgeOperator)
-    ensure_bridge_dir()
-    # Auto-start on addon load
+    os.makedirs(BRIDGE_DIR, exist_ok=True)
     if not bpy.app.timers.is_registered(execute_command):
         bpy.app.timers.register(execute_command, persistent=True)
     print(f"Claude Bridge: listening at {BRIDGE_DIR}")
