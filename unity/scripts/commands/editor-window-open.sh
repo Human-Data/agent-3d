@@ -78,8 +78,13 @@ internal class OpenWindowCmd : IRunCommand
         }
 
         int total = Resources.FindObjectsOfTypeAll(type).Length;
+#if UNITY_6000_5_OR_NEWER
+        var id = w.GetEntityId();
+#else
+        var id = w.GetInstanceID();
+#endif
         Debug.Log("[editor-window-open] " + type.FullName + "  mode=" + MODE +
-                  " id=" + w.GetInstanceID() + " pos=" + w.position + " total=" + total);
+                  " id=" + id + " pos=" + w.position + " total=" + total);
     }
 }
 CSHARP
